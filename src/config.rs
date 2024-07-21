@@ -1,10 +1,9 @@
 use super::theme_manager::LinkMethod;
 use serde::Deserialize;
+use std::fs;
 use std::{collections::HashMap, env, path::PathBuf, str::FromStr};
 
 const CONF_FILE: &str = "tsw.toml";
-
-use std::fs;
 
 #[derive(Deserialize, Debug)]
 pub struct AppConfig {
