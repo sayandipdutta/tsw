@@ -1,10 +1,8 @@
+use std::fs;
 use std::{
-    fs::{self, hard_link},
-    io::Error,
-    os::unix::fs::symlink,
+    borrow::Borrow, fs::hard_link, io::Error, os::unix::fs::symlink, path::Path, sync::Arc, thread,
 };
 
-use expanduser::expanduser;
 use serde::Deserialize;
 
 use crate::{
@@ -20,26 +18,45 @@ pub enum LinkMethod {
 }
 
 pub fn apply_theme(theme: Theme, config: Config) {
+    let mut handles = vec![];
+    let theme = Arc::new(theme);
     for (app_name, app_config) in config.apps {
-        let file = get_filename_based_on_theme(&app_config, &theme);
-        let status = link(file, &app_config.target, &app_config.method);
-        if let Err(_) = status {
-            println!("Config for {} not found", app_name);
-        }
+        let app_config = Arc::new(app_config);
+        let app_name = Arc::new(app_name);
+        let theme = Arc::clone(&theme);
+        let handle = thread::spawn(move || {
+            let c = app_config.borrow();
+            let t = theme.borrow();
+            let file = get_filename_based_on_theme(c, &t);
+            if !Path::new(file).is_file() {
+                println!("Config for {} not found", app_name);
+                return;
+            }
+            let status = link(file, &c.target, &c.method);
+            if let Err(e) = status {
+                println!(
+                    "Error occurred while linking config for {}: {:?}",
+                    app_name, e
+                );
+            }
+        });
+        handles.push(handle);
+    }
+    for handle in handles {
+        handle.join().unwrap();
     }
 }
 
 fn link(source: &str, target: &str, method: &LinkMethod) -> Result<(), Error> {
-    let source_path = expanduser(source)?;
-    let target_path = expanduser(target)?;
-
-    if !(target_path.is_dir()) {
-        fs::remove_file(&target_path)?;
+    if Path::new(&target).is_file() | Path::new(&target).is_symlink() {
+        fs::remove_file(&target)?;
+    } else {
+        eprintln!("Target file exists, and not a file or symlink {}", &target);
+        return Ok(());
     }
-
     match method {
-        LinkMethod::Hard => hard_link(source_path, target_path),
-        LinkMethod::Soft => symlink(source_path, target_path),
+        LinkMethod::Hard => hard_link(&source, &target),
+        LinkMethod::Soft => symlink(&source, &target),
     }
 }
 
